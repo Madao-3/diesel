@@ -61,6 +61,30 @@ pub fn build_cli() -> App<'static, 'static> {
                         .help("The format of the migration to be generated."),
                 ),
         )
+        .subcommand(
+            SubCommand::with_name("model")
+                .about(
+                    "Generate a new table migration with given name, and \
+                     the current timestamp as the version, \
+                     also you can define table columns with columns option."
+                )
+                .arg(
+                    Arg::with_name("TABLE_NAME")
+                        .help("The name of table to create, also the \
+                               part of migration file name.")
+                        .required(true),
+                )
+                .arg(
+                    Arg::with_name("COLUMNS")
+                        .long("columns")
+                        .short("c")
+                        .help(
+                            "The columns detail of the migration to be generated.(Currently support barrel)",
+                        )
+                        .takes_value(true)
+                        .required(true),
+                ),
+        )
         .setting(AppSettings::SubcommandRequiredElseHelp);
 
     let setup_subcommand = SubCommand::with_name("setup")

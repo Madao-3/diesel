@@ -128,7 +128,6 @@ fn run_migration_command(matches: &ArgMatches) -> Result<(), Box<Error>> {
             let versioned_name = format!("{}_{}", version, migration_name);
             let migration_dir = migrations_dir(matches).join(versioned_name);
             fs::create_dir(&migration_dir).unwrap();
-
             match args.value_of("MIGRATION_FORMAT") {
                 #[cfg(feature = "barrel-migrations")]
                 Some("barrel") => ::barrel::integrations::diesel::generate_initial(&migration_dir),
@@ -137,10 +136,108 @@ fn run_migration_command(matches: &ArgMatches) -> Result<(), Box<Error>> {
                 None => unreachable!("MIGRATION_FORMAT has a default value"),
             }
         }
+        ("model", Some(args)) => {
+            let table_name = args.value_of("TABLE_NAME").unwrap().to_lowercase();
+            let columns_detail : String = args.value_of("COLUMNS").unwrap().to_string();
+
+            let version = migration_version(args);
+            let versioned_name = format!("{}_create_{}", version, table_name);
+            let migration_dir = migrations_dir(matches).join(versioned_name);
+
+            fs::create_dir(&migration_dir).unwrap();
+
+            #[cfg(feature = "barrel-migrations")]
+            ::barrel::integrations::diesel::generate_initial_with_content(&migration_dir, &generate_barrel_up_content(&table_name, &columns_detail), &generate_barrel_down_content(&table_name));
+        }
         _ => unreachable!("The cli parser should prevent reaching here"),
     };
 
     Ok(())
+}
+
+fn generate_barrel_down_content(table_name: &String) -> String {
+    format!("fn down(migr: &mut Migration) {{ migr.drop_table(\"{}\"); }}\n", table_name)
+}
+
+fn get_column_type (column_type: &String) -> &'static str {
+    return  match column_type.as_str() {
+                "string" => "Varchar(255)",
+                "text" => "Text",
+                "integer" => "Integer",
+                "boolean" => "Boolean",
+                "date" => "Date",
+                "float" => "Float",
+                _ => "Varchar(255)",
+            }
+}
+
+fn generate_barrel_insert_script (name: &String, column_type: &String) -> String {
+  format!("    t.add_column(\"{}\", {})\n", name, get_column_type(&column_type).to_string())
+}
+
+fn generate_barrel_up_content(table_name: &String, columns_detail: &String) -> String {
+    let mut result = "fn up(migr: &mut Migration) {\n".to_string();
+    result.push_str(&format!("  migr.create_table(\"{}\", |t: &mut Table| {{\n", table_name));
+
+    let limit = columns_detail.chars().count();
+
+    let mut column_name = "".to_string();
+    let mut column_type = "".to_string();
+
+    let mut index = 0;
+    let colum_chars: Vec<_> = columns_detail.chars().collect();
+
+    loop {
+        if index > limit { break; }
+        let mut current = if index == limit { "".to_string() } else { colum_chars[index].to_string() };
+
+        if (current == " ".to_string()) || index == limit {
+            if column_name.is_empty() {
+                eprintln!(
+                  "WARNING: `columns's options format not right!"
+                );
+                break;
+            }
+
+            let mut _column_type = column_type.to_string();
+            if _column_type.is_empty() { _column_type = "string".to_string() }
+            result.push_str(&generate_barrel_insert_script(&column_name, &_column_type));
+            column_name = "".to_string();
+            column_type = "".to_string();
+            index += 1;
+            if index >= limit { break; }
+        } else {
+            current = colum_chars[index].to_string();
+
+            if current == ":".to_string() {
+                eprintln!(
+                  "WARNING: `columns's options format not right!"
+                );
+                break;
+            }
+
+            if current == " ".to_string() { continue; }
+            loop {
+                if limit <= index { break; }
+                if current == " ".to_string() { break; }
+                index += 1;
+                if current == ":".to_string() { break; }
+                column_name.push_str(&current.to_string());
+                current = colum_chars[index].to_string();
+            }
+
+            if (limit < index) || (colum_chars[index].to_string() == " ") { continue; }
+            loop {
+                if index < limit { current = colum_chars[index].to_string(); }
+                if current == " " { break; }
+                column_type.push_str(&current.to_string());
+                if index < limit { index += 1; }
+                if index >= limit { break; }
+            }
+        }
+    }
+    result.push_str("  })\n}\n\n");
+    result
 }
 
 fn generate_sql_migration(path: &PathBuf) {
